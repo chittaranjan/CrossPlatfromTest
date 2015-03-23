@@ -15,28 +15,30 @@ NAN_METHOD(Print) {
 
 	NanScope();
 
-	if (args.Length() != 1)
+	if (args.Length() != 2)
     {
         return NanThrowError("Invalid number of arguments");  
     }
 
-	Local<Number> timer = args[0].As<Number>();
+   if (!args[1]->IsFunction())
+    {
+        return NanThrowTypeError("Last argument must be a function.");
+    }
+	int64_t timer = args[0]->IntegerValue();
  	#ifdef _WIN32
     Sleep(timer);
     #else
     usleep(timer * 1000);
     #endif
 
- 	Local<String> str = args[0].As<String>();
- 	int strlength = strlen(*String::Utf8Value(str));
-	
-	Local<Number> strLength = NanNew<Number>(strlength);
+    NanMakeCallback(NanGetCurrentContext()->Global(), args[1].As<Function>(), 0, NULL);
 
-	NanReturnValue(strLength);
+    NanReturnUndefined();
+
 }
 
 void Init(Handle<Object> exports) {
-    exports->Set(NanNew("length"), NanNew<FunctionTemplate>(Print)->GetFunction());
+    exports->Set(NanNew("delay"), NanNew<FunctionTemplate>(Print)->GetFunction());
 }
 
 NODE_MODULE(myaddon, Init);

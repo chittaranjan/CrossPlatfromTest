@@ -1,1 +1,1 @@
-cmd_Release/myaddon.node := rm -rf "Release/myaddon.node" && cp -af "Release/obj.target/myaddon.node" "Release/myaddon.node"
+cmd_Release/myaddon.node := ./gyp-mac-tool flock ./Release/linker.lock c++ -bundle -Wl,-search_paths_first -mmacosx-version-min=10.5 -arch x86_64 -L./Release  -o Release/myaddon.node Release/obj.target/myaddon/myaddon.o -undefined dynamic_lookup
