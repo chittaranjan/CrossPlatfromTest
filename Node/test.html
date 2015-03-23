@@ -1,0 +1,853 @@
+/**
+ * @internal
+ * @ingroup CAPI_SOCIAL_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_FRAMEWORK Health Data
+ * @brief The Health data module provides APIs to store health info and share among multiple applications.
+ * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ * It provides functions to manage health data, observe changes to health data tables, manage devices, request permissions and view the user profile information.
+ *
+ * - Provides functions to connect and disconnect to the storage using @ref CAPI_HEALTH_DATA_MODULE_STORAGE APIs.
+ * - Permissions need to be acquired by the application to perform any operation on the health data tables. These are provided by the the @ref CAPI_HEALTH_DATA_MODULE_PERMISSION APIs.
+ * - Database operations such as Insert, Read, Update, Delete and Aggregate are performed using @ref CAPI_HEALTH_DATA_MODULE_RESOLVER APIs.
+ * - Filters can be added to the DB operations using the @ref CAPI_HEALTH_DATA_MODULE_FILTER APIs.
+ * - A result handle is is returned after a DB operation through the registered callback. The result status can be obtained using the @ref CAPI_HEALTH_DATA_MODULE_RESULT APIs.
+ * - A cursor handle is contained within the result handle. The information returned after a read operation can be obtained from this cursor handle using the @ref CAPI_HEALTH_DATA_MODULE_CURSOR APIs.
+ * - Applications can register for notifications to be received if any changes are made to any health data table using the @ref CAPI_HEALTH_DATA_MODULE_OBSERVER APIs.
+ * - The application can create, register and retrieve device information using the @ref CAPI_HEALTH_DATA_MODULE_DEVICE and @ref CAPI_HEALTH_DATA_MODULE_DEVICE_INFO APIs.
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_SAMPLE_CODE Sample Code
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_SAMPLE_CODE_STORAGE Creating Storage
+ * 1. Create Health Data Storage
+ * @code
+ * health_data_storage_h storage;
+ * int result = health_data_storage_create (&storage);
+ * if (result != HEALTH_ERROR_NONE) {
+ *     if(storage != NULL)
+ *     {
+ *         health_data_storage_destroy(storage);
+ *     }
+ *     dlog_print(DLOG_ERROR, LOG_TAG, "Creating Health Storage handle is failed.");
+ *     return;
+ * }
+ * health_data_storage_connected_cb healthDataCB;
+ *
+ * @endcode
+ * 2. Connect to the Storage
+ * @code
+ * health_data_storage_connect (storage, healthDataCB, (void*)user_data);
+ * @endcode
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_SAMPLE_CODE_PERMISSIONS Acquiring Permissions
+ * 1. Create Health Data Permission Manager handle
+ * @code
+ * health_permission_manager_h permission_manager;
+ * int ret = health_permission_manager_create(storage, &permission_manager);
+ * if (ret != 0)
+ * {
+ *     dlog_print(DLOG_ERROR, LOG_TAG,"health_permission_manager_create: Failed:%d", ret);
+ *     return;
+ * }
+ * @endcode
+ * 2. Request Permissions with data type and permission type
+ * @code
+ * health_permission_request_s pre_permission_manager [] = {
+ *     {health_constants_step_count.health_data_type, HEALTH_PERMISSION_READ},
+ *     {health_constants_step_count.health_data_type, HEALTH_PERMISSION_WRITE},
+ * };
+ * int array_size = sizeof (pre_permission_manager) / sizeof (health_permission_request_s);
+ * health_permission_request_s ** permission_key = calloc (array_size, sizeof (health_permission_request_s*));
+ * int idx = 0;
+ * for (idx = 0; idx < array_size; idx++) {
+ *     permission_key[idx] = &pre_permission_manager[idx];
+ * }
+ *
+ * ret = health_permission_manager_request_permissions(permission_manager, permission_key, array_size, on_health_permission_manager_request_permission_cb, NULL);
+ * free (permission_key);
+ * if (ret != 0)
+ * {
+ *     health_permission_manager_destroy(permission_manager);
+ *     dlog_print(DLOG_ERROR, LOG_TAG,"health_permission_manager_request_permissions: Failed:%d", ret);
+ *     return;
+ * }
+ * @endcode
+ * 3. destroy permission manager handle after obtaining permissions
+ * @code
+ * health_permission_manager_destroy(permission_manager);
+ * @endcode
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_SAMPLE_CODE_DEVICE Creating Health Device
+ * 1. Create Health Device using device builder
+ * @code
+ * health_device_h device;
+ * health_device_builder_h healthBuilderDevice = NULL;
+ *
+ * // seed must be unique value (ex. "IX229f74t90")
+ * retVal = health_device_builder_create("IX229f74t90",&healthBuilderDevice);
+ * if(retVal != HEALTH_ERROR_NONE)
+ * {
+ *     dlog_print(DLOG_ERROR, LOG_TAG, "Failed to do health_device_create");
+ *     return;
+ * }
+ * retVal = health_device_create (healthBuilderDevice, &device);
+ * @endcode
+ * 2. Set information for the device
+ * @code
+ * health_device_builder_set_string(healthBuilderDevice, HEALTH_DEVICE_DATA_TYPE_CUSTOM_NAME, "Health Device Test");
+ * health_device_builder_set_string(healthBuilderDevice, HEALTH_DEVICE_DATA_TYPE_MODEL, "HDT-100");
+ * health_device_builder_set_string(healthBuilderDevice, HEALTH_DEVICE_DATA_TYPE_MANUFACTURER, "Tizen");
+ * health_device_builder_set_group(healthBuilderDevice, HEALTH_DEVICE_GROUP_MOBILE);
+ * @endcode
+ * 3. Register the device
+ * @code
+ * retVal = health_device_info_register_device(storage, device);
+ * if(retVal != HEALTH_ERROR_NONE)
+ * {
+ *     health_device_destroy(device);
+ *     health_device_builder_destroy(healthBuilderDevice);
+ *     dlog_print(DLOG_ERROR, LOG_TAG, "Failed to do health_device_info_register_device");
+ *     return false;
+ * }
+ * @endcode 
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_SAMPLE_CODE_DATA Creating Health Data
+ * 1. Create Health Data and Health Data Array
+ * @code
+ * int retVal = HEALTH_ERROR_NONE;
+ * health_data_h healthData = NULL;
+ * health_data_h healthDataArray[HEALTH_INSERT_COUNT] = {0,};
+ * char* deviceUUID;
+ *
+ * int64_t milisec = 0;
+ * if (gettimeofday(&tp, NULL) ==0) {
+ *     milisec = (int64_t)tp.tv_sec * 1000 + (int64_t)tp.tv_usec / 1000;
+ * }
+ * int64_t nowInMiliSec = milisec; 
+ *
+ * for (int idx = 0; idx < HEALTH_INSERT_COUNT; idx++) {
+ *     retVal = health_data_create (&healthData);
+ *     if(retVal != HEALTH_ERROR_NONE)
+ *     {
+ *         dlog_print(DLOG_ERROR, LOG_TAG, "Failed to do health_data_create");
+ *         return false;
+ *     }
+ *
+ *     // need to set source device to insert health data
+ *     health_data_set_source_device(healthData, health_device_get_string(device, HEALTH_DEVICE_DATA_TYPE_UUID, &deviceUUID));
+ *
+ *     health_data_put_float(healthData, health_constants_heart_rate.heart_rate, 92.0 + idx);
+ *     health_data_put_int(healthData, health_constants_heart_rate.heart_beat_count, 120 + idx*5);
+ *     health_data_put_int(healthData, health_constants_heart_rate.health_session_measurement.end_time, nowInMiliSec);
+ *     health_data_put_int(healthData, health_constants_heart_rate.health_session_measurement.start_time, nowInMiliSec);
+ *     health_data_put_int(healthData, health_constants_heart_rate.health_session_measurement.time_offset, 90);
+ *
+ *     healthDataArray[idx] = healthData;
+ * }
+ * @endcode
+ * 2. Create Insert Request 
+ * @code
+ * health_data_insert_request_h insertRequest = NULL;
+ * retVal = health_data_insert_request_create (&insertRequest);
+ *
+ * if(retVal != HEALTH_ERROR_NONE)
+ * {
+ *     dlog_print(DLOG_ERROR, LOG_TAG, "Failed to do health_data_insert_request_create");
+ *     return false;
+ * }
+ *
+ * retVal = health_data_insert_request_set_health_data_type (insertRequest, health_constants_heart_rate.health_data_type);
+ * if(retVal != HEALTH_ERROR_NONE)
+ * {
+ *     health_data_insert_request_destroy(insertRequest);
+ *     dlog_print(DLOG_ERROR, LOG_TAG,"Failed to do health_data_insert_request_set_health_data_type");
+ *     return false;
+ * } 
+ * retVal = health_data_insert_request_set_health_data (insertRequest, healthData, HEALTH_INSERT_COUNT); 
+ * if(retVal != HEALTH_ERROR_NONE)
+ * {
+ *     health_data_insert_request_destroy(insertRequest);
+ *     dlog_print(DLOG_ERROR, LOG_TAG,"Failed to do health_data_insert_request_set_health_data");
+ *     return false;
+ * }
+ * @endcode
+ * 3. Insert Health Data
+ * @code
+ * int requestId = 0;
+ * retVal = health_data_resolver_insert_async(storageHandle, insertRequest, &requestId ,OnHealthInsertResult, (void*) this );
+ * if(retVal != HEALTH_ERROR_NONE)
+ * {
+ *     dlog_print(DLOG_ERROR, LOG_TAG, "Failed to do health_data_resolver_insert_async");
+ *     health_data_insert_request_destroy (insertRequest);
+ *     return false;
+ * }
+ * @endcode
+ * 4. Delete request
+ * @code
+ * retVal = health_data_insert_request_destroy (insertRequest);
+ * if(retVal != HEALTH_ERROR_NONE)
+ * {
+ *     dlog_print(DLOG_ERROR, LOG_TAG, "Failed to do health_data_insert_request_destroy");
+ *     return false;
+ * } 
+ * @endcode 
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_SAMPLE_CODE_OBSERVER Setting Observer
+ * 1. Register an observer to listen to any change in health data
+ * @code
+ * // Called when any change occurs in health data tables
+ * void on_health_data_changed(char* health_data_type, void* user_data);
+ *
+ * health_data_observer_set(storage, health_constants_heart_rate.heart_rate, on_health_data_changed, NULL);
+ * @endcode
+ * 2. Unregister an observer
+ * @code
+ * health_data_observer_unset(storage, "health_constants_heart_rate.heart_rate");
+ * @endcode
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_FILTER Filters
+ * Queries are used to retrieve data which satisfies given criteria, like an integer
+ * property being greater than a given value, or a string property containing a given substring.
+ * The criteria are defined by creating filters and adding conditions to them, joining them
+ * with logical operators. Also, instead of a condition, another filter can be added,
+ * which can be used to create more complex filters.
+ *
+ * Operator precedence in filters determined by the order in which the
+ * conditions and filters are added.
+ *
+ * When a filter is ready, it can be set as a property of a query.
+ * Other query properties allow configuring how the returned results
+ * are grouped and sorted.
+ *
+ * Operator precedence in filters is determined by the order in which the
+ * conditions and filters are added are added.
+ * For example, if the following sequence is added:
+ *
+ * <table>
+ * <caption> Table: Filter and conditions </caption>
+ * <tr>
+ *	<th> Filter with conditions </th>
+ *	<th> Result </th>
+ * </tr>
+ * <tr>
+ *	<td>
+ *		Contidion C1 <br>
+ *		OR <br>
+ *		Contidion C2 <br>
+ *		AND <br>
+ *		Condition C3
+ *	</td>
+ *	<td> (C1 OR C2) AND C3 </td>
+ * </tr>
+ * <tr>
+ *	<td>
+ *		Filter F1: <br>
+ *			Condition C1 <br>
+ *			OR <br>
+ *			Condition C2 <br><br>
+ *		Filter F2: <br>
+ *			Condition C3 <br>
+ *			OR <br>
+ *			Condition C4 <br><br>
+ *		Filter F3: <br>
+ *			Condition C5 <br>
+ *			AND <br>
+ *			F1 <br>
+ *			AND <br>
+ *			F2
+ *	</td>
+ *	<td>
+ *		(C5 AND F1) AND F2 <br>
+ *		Which is: <br>
+ *		(C5 AND (C1 OR C2)) AND (C3 OR C4)
+ *	</td>
+ * </tr>
+ * </table>
+ *
+ * The following code creates a filter, which heart beat count is in a particular range.
+  *
+ * @code
+ * // create two filters: which are heart_beat_count >= 60, heart_beat_count <=130
+ * int lowerLimit = 60;
+ * int upperLimit = 130;
+ *
+ * health_data_filter_h firstFilter = health_data_filter_create_int((char *)health_constants_heart_rate.heart_beat_count, HEALTH_DATA_FILTER_MATCH_GREATER_THAN_OR_EQUAL, lowerLimit);
+ * health_data_filter_h secondFilter = health_data_filter_create_int((char *)health_constants_heart_rate.heart_beat_count, HEALTH_DATA_FILTER_MATCH_LESS_THAN, upperLimit);
+ *
+ * // create a filter with AND operation
+ * health_data_filter_h filterFinal = health_data_filter_create_and(firstFilter, secondFilter);
+ *
+ * // query using read request with filterFinal
+ * retVal = health_data_read_request_set_filter(readRequestHandle, filterFinal);
+ *
+ * // destroying filterFinal will free all the filters created
+ * health_data_filter_destroy(filterFinal);
+ * @endcode
+ *
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_SAMPLE_CODE_UTIL Unit Conversion
+ * Health Data framework stores health data in designated units only (eg, meter). Conversion APIs for unit is available.
+ *
+ * Check whether two health data units are compatible
+ * @code
+ * bool isCompatibleRetValue = false;
+ * health_data_unit_is_compatible_string(CENTIMETER_LITERAL, "cm", &isCompatibleRetValue);
+ * if (false != isCompatibleRetValue)
+ * {
+ *    DMSG("health_data_unit_is_compatible_string failed);
+ *    return;
+ * }
+ * @endcode
+ * Convert a value from source unit to destination unit
+ * @code
+ * int retVal = 0;
+ * double conversionRetValue = 0.0;
+ * retVal = health_data_unit_convert(POUND_LITERAL, 1.0,  KILOGRAM_LITERAL, &conversionRetValue);
+ * @endcode
+ */
+
+/**
+ * @internal
+ * @ingroup CAPI_HEALTH_DATA_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_MODULE Common
+ * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ * This section defines constants of health data and contains constant structures for various kinds of health data such as the step count or exercise.\n
+ * Basic interfaces for health constant are #health_common_constants_s, #health_discrete_measurement_s, #health_permission_type_s and #health_session_measurement_s.\n
+ * The Health platform provides useful predefined data types as below.
+ * @section CAPI_HEALTH_DATA_PREDEFINED_EXERCISE_TYPE Predefined Exercise Type
+ * <p> The following table shows the predefined exercise type. </p>
+ * <table>
+ * <caption> Table: Predefined Exercise Type </caption>
+ * <tr>
+ *	<th> Exercise name </th>
+ *	<th> Exercise type </th>
+ * </tr>
+ * <tr>
+ *	<td> Walking </td>
+ *	<td> 1001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Running, 4 mph (13 min/mile) </td>
+ *	<td> 1002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Baseball </td>
+ *	<td> 2001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Softball, General </td>
+ *	<td> 2002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Cricket </td>
+ *	<td> 2003 </td>
+ * </tr>
+ * <tr>
+ *	<td> Golf </td>
+ *	<td> 3001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Billiards </td>
+ *	<td> 3002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Bowling </td>
+ *	<td> 3003 </td>
+ * </tr>
+ * <tr>
+ *	<td> Field hockey </td>
+ *	<td> 2003 </td>
+ * </tr>
+ * <tr>
+ *	<td> Cricket </td>
+ *	<td> 4001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Rugby, Touch, Non-competitive </td>
+ *	<td> 4002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Basketball, General </td>
+ *	<td> 4003 </td>
+ * </tr>
+ * <tr>
+ *	<td> Football, Casual </td>
+ *	<td> 4004 </td>
+ * </tr>
+ * <tr>
+ *	<td> Handball, General </td>
+ *	<td> 4005 </td>
+ * </tr>
+ * <tr>
+ *	<td> Football, Casual </td>
+ *	<td> 4004 </td>
+ * </tr>
+ * <tr>
+ *	<td> American football </td>
+ *	<td> 4006 </td>
+ * </tr>
+ * <tr>
+ *	<td> Volleyball, General </td>
+ *	<td> 5001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Beach volleyball </td>
+ *	<td> 5002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Squash </td>
+ *	<td> 6001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Tennis, General </td>
+ *	<td> 6002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Badminton, Competitive </td>
+ *	<td> 6003 </td>
+ * </tr>
+ * <tr>
+ *	<td> Table Tennis </td>
+ *	<td> 6004 </td>
+ * </tr>
+ * <tr>
+ *	<td> Racquetball </td>
+ *	<td> 6005 </td>
+ * </tr>
+ * <tr>
+ *	<td> T'ai chi, General </td>
+ *	<td> 7001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Boxing, in Ring </td>
+ *	<td> 7002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Martial arts, Moderate pace </td>
+ *	<td> 7003 </td>
+ * </tr>
+ * <tr>
+ *	<td> Ballet </td>
+ *	<td> 8001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Dancing </td>
+ *	<td> 8002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Ballroom dance, Fast </td>
+ *	<td> 8003 </td>
+ * </tr>
+ * <tr>
+ *	<td> Pilates </td>
+ *	<td> 9001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Yoga </td>
+ *	<td> 9002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Stretching, Mild </td>
+ *	<td> 10001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Skipping (100~120/min) </td>
+ *	<td> 10002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Hula-hooping </td>
+ *	<td> 10003 </td>
+ * </tr>
+ * <tr>
+ *	<td> Push-up (Press-up) </td>
+ *	<td> 10004 </td>
+ * </tr>
+ * <tr>
+ *	<td> Pull-up (Chin-up) </td>
+ *	<td> 10005 </td>
+ * </tr>
+ * <tr>
+ *	<td> Sit-up (Sit-up) </td>
+ *	<td> 10006 </td>
+ * </tr>
+ * <tr>
+ *	<td> Circuit training </td>
+ *	<td> 10007 </td>
+ * </tr>
+ * <tr>
+ *	<td> Inline skating, Normal </td>
+ *	<td> 11001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Hang gliding </td>
+ *	<td> 11002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Pistol shooting </td>
+ *	<td> 11003 </td>
+ * </tr>
+ * <tr>
+ *	<td> Archery, Non-hunting </td>
+ *	<td> 11004 </td>
+ * </tr>
+ * <tr>
+ *	<td> Horseback riding </td>
+ *	<td> 11005 </td>
+ * </tr>
+ * <tr>
+ *	<td> Bicycling, Moderate </td>
+ *	<td> 11007 </td>
+ * </tr>
+ * <tr>
+ *	<td> Frisbee </td>
+ *	<td> 11008 </td>
+ * </tr>
+ * <tr>
+ *	<td> Roller skiing </td>
+ *	<td> 11009 </td>
+ * </tr>
+ * <tr>
+ *	<td> Aerobic, High Impact </td>
+ *	<td> 12001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Hiking </td>
+ *	<td> 13001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Rock climbing, Low to moderate Difficulty </td>
+ *	<td> 13002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Backpacking </td>
+ *	<td> 13003
+ * </td>
+ * </tr>
+ * <tr>
+ *	<td> Mountain biking </td>
+ *	<td> 13004 </td>
+ * </tr>
+ * <tr>
+ *	<td> Orienteering </td>
+ *	<td> 13005 </td>
+ * </tr>
+ * <tr>
+ *	<td> Not Lap Swimming, General </td>
+ *	<td> 14001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Aquarobics </td>
+ *	<td> 14002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Canoeing </td>
+ *	<td> 14003 </td>
+ * </tr>
+ * <tr>
+ *	<td> Sailing </td>
+ *	<td> 14004 </td>
+ * </tr>
+ * <tr>
+ *	<td> Skin diving, Scuba diving, General  </td>
+ *	<td> 14005 </td>
+ * </tr>
+ * <tr>
+ *	<td> Snorkeling </td>
+ *	<td> 14006 </td>
+ * </tr>
+ * <tr>
+ *	<td> Kayaking </td>
+ *	<td> 14007 </td>
+ * </tr>
+ * <tr>
+ *	<td> Kite surfing </td>
+ *	<td> 14008 </td>
+ * </tr>
+ * <tr>
+ *	<td> Rafting </td>
+ *	<td> 14009 </td>
+ * </tr>
+ * <tr>
+ *	<td> Rowing </td>
+ *	<td> 14010 </td>
+ * </tr>
+ * <tr>
+ *	<td> Windsurfing </td>
+ *	<td> 14011 </td>
+ * </tr>
+ * <tr>
+ *	<td> Yachting </td>
+ *	<td> 14012 </td>
+ * </tr>
+ * <tr>
+ *	<td> Water Skiing </td>
+ *	<td> 14013 </td>
+ * </tr>
+ * <tr>
+ *	<td> Step Machine </td>
+ *	<td> 15001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Weight Machine </td>
+ *	<td> 15002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Stationary Bicycle, Moderate to vigorous effort (90-100 watts) </td>
+ *	<td> 15003 </td>
+ * </tr>
+ * <tr>
+ *	<td> Rowing machine </td>
+ *	<td> 15004 </td>
+ * </tr>
+ * <tr>
+ *	<td> Cross country skiing </td>
+ *	<td> 16001 </td>
+ * </tr>
+ * <tr>
+ *	<td> Skiing, Moderate </td>
+ *	<td> 16002 </td>
+ * </tr>
+ * <tr>
+ *	<td> Ice Dancing </td>
+ *	<td> 16003 </td>
+ * </tr>
+ * <tr>
+ *	<td> Ice Skating, General </td>
+ *	<td> 16004 </td>
+ * </tr>
+ * <tr>
+ *	<td> Ice Hockey, General </td>
+ *	<td> 16006 </td>
+ * </tr>
+ * <tr>
+ *	<td> Snowboarding, Moderate </td>
+ *	<td> 16007 </td>
+ * </tr>
+ * <tr>
+ *	<td> Alpine skiing </td>
+ *	<td> 16008 </td>
+ * </tr>
+ * <tr>
+ *	<td> Snow shoeing </td>
+ *	<td> 16009 </td>
+ * </tr>
+ *
+ * </table>
+ *
+ */ 
+
+/**
+ * @internal
+ * @ingroup CAPI_HEALTH_DATA_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_MODULE_DATA Data
+ * @brief The health data API provides the set of definitions and interfaces that enable application developers to manage health data.
+  * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ * The health data API provides data structure and functions to manage health data
+ * @subsection CAPI_HEALTH_DATA_MODULE_API_USAGE API Usage
+ * 1) Create a #health_data_h handle.<br>
+ * 2) The health_data 'put' APIs can be called to add values to the health_data handle.<br>
+ * 3) The key parameter generally refers to the column name (refer @ref CAPI_HEALTH_DATA_MODULE)<br>
+ *
+ */
+
+/**
+ * @internal
+ * @ingroup CAPI_HEALTH_DATA_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_MODULE_CURSOR Cursor
+ * @brief The health cursor API provides the set of definitions and interfaces that enable application developers to use database cursor operations.
+ * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ * The health cursor API provides functions for database cursor operations.
+ * @subsection CAPI_HEALTH_DATA_MODULE_API_USAGE API Usage
+ * 1) Perform Read operation. (refer @ref CAPI_HEALTH_DATA_MODULE_RESOLVER).<br>
+ * 2) If read operation is successful, the registered callback is executed which contains the #health_data_result_h handle.<br>
+ * 3) The #health_data_cursor_h handle is contained within the #health_data_result_h handle.<br>
+ * 4) Obtain a reference to the #health_data_cursor_h handle using health_data_result_get_cursor() API.<br>
+ * 5) Execute @ref CAPI_HEALTH_DATA_MODULE_CURSOR APIs using the obtained #health_data_cursor_h handle.<br>
+ */
+
+/**
+ * @internal
+ * @ingroup CAPI_HEALTH_DATA_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_MODULE_DEVICE Device
+ * @brief The health device API provides the set of definitions and interfaces that enable application developers to represent a physical device.
+ * 			It is used to identify data source to each {@link health_data_h} instance.
+ * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ * The health device API provides functions to represent a physical device.
+ * @subsection CAPI_HEALTH_DATA_MODULE_API_USAGE API Usage
+ * 1) Create a #health_device_h handle. (health_device_create())<br>
+ * 2) Set the name, seed(unique), manufacturer, model, group to the health_device_h handle using the health_device 'set' APIs.<br>
+ * 3) Destroy #health_device_h handle.<br>
+ */
+
+/**
+ * @internal
+ * @ingroup CAPI_HEALTH_DATA_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_MODULE_DEVICE_INFO Device Info
+ * @brief The health device info API provides the set of definitions and interfaces that enable application developers to manage information of physical devices. {@link health_device_h}
+ * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ * The health device info API provides functions to manage information of physical devices.
+ * @subsection CAPI_HEALTH_DATA_MODULE_API_USAGE API Usage
+ * 1) Create a health device (refer @ref CAPI_HEALTH_DATA_MODULE_DEVICE)<br>
+ * 2) Register the device create using health_device_info_register_device() API.<br>
+ * 3) Execute device_info 'get' APIs to retrieve the device(s).<br>
+ * 4) The contents of retrieved health device(s) can be displayed using @ref CAPI_HEALTH_DATA_MODULE_DEVICE.<br>
+ *
+ */
+
+/**
+ * @internal
+ * @ingroup CAPI_HEALTH_DATA_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_MODULE_FILTER Filter
+ * @brief The health filter API provides the set of definitions and interfaces that enable application developers to use database filter operations.
+ * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ * The health filter API provides functions to use database filter operations.
+ * @subsection CAPI_HEALTH_DATA_MODULE_API_USAGE API Usage
+ * 1) Filters are added to Read, Update, Delete and Aggregate operations.<br>
+ * 2) Create a filter using @ref CAPI_HEALTH_DATA_MODULE_FILTER APIs.<br>
+ * 3) Set the filter to the requests using health_data_read_request_set_filter(), health_data_update_request_set_filter(), etc APIs based on the operation being performed (refer @ref CAPI_HEALTH_DATA_MODULE_RESOLVER).<br>
+ * 4) Perform the required operation (refer @ref CAPI_HEALTH_DATA_MODULE_RESOLVER).<br>
+ *
+ */
+
+/**
+ * @internal
+ * @ingroup CAPI_HEALTH_DATA_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_MODULE_OBSERVER Observer
+ * @brief The health observer API provides the set of definitions and interfaces that enable application developers to add/remove observers for health data change.
+ * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ * The health observer API provides functions to add/remove observers for health data change.
+ * @subsection CAPI_HEALTH_DATA_MODULE_API_USAGE API Usage
+ * 1) The callback registered in health_data_observer_set() API is executed when the data_type data is changed.<br>
+ * 2) data_type values can be found in @ref CAPI_HEALTH_DATA_MODULE<br>
+ */
+
+/**
+ * @internal
+ * @ingroup CAPI_HEALTH_DATA_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_MODULE_PERMISSION Permission
+ * @brief The health permission manager API provides the set of definitions and interfaces that enable application developers to manage permissions for health data.
+ * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ * The health permission manager API provides functions to manage permissions for health data.
+ * @subsection CAPI_HEALTH_DATA_MODULE_API_USAGE API Usage
+ * 1) Create a #health_permission_manager_h handle.<br>
+ * 2) Create the an array of health_permission_request_s which lists the the data_type and the required permission. (refer @ref CAPI_HEALTH_DATA_MODULE for the data_type)<br>
+ * 3) Check if permissions are already acquired for the requests in Step 2 by calling health_permission_manager_is_permissions_acquired(). A result array is returned which contains the permission status of each request.<br>
+ * 4) If the permission for any request is not granted, request for permissions using the health_permission_manager_request_permissions() API.<br>
+ * 5) A result array is returned in the registered callback which lists whether the permission was granted or denied for the requests.<br>
+ * 6) Destroy the #health_permission_manager_h handle.<br>
+ *
+ */
+
+/**
+ * @internal
+ * @ingroup CAPI_HEALTH_DATA_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_MODULE_RESOLVER Resolver
+ * @brief The health resolver API provides the set of definitions and interfaces that enable application developers to insert, read, update, aggregate and delete health data.
+ * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ *  The health resolver API provides functions to insert, read, update, aggregate and delete health data.
+ * @subsection CAPI_HEALTH_DATA_MODULE_API_USAGE API Usage
+ * NOTE: For the following operations,<br>
+ * 1) Application needs to be connected to data storage (refer @ref CAPI_HEALTH_DATA_MODULE_STORAGE).<br>
+ * 2) Read/Write permissions need to be requested for the respective data_type on which the operations are performed.<br>
+ * @subsection CAPI_HEALTH_DATA_MODULE_INSERT_OPERATIONS Insert Operations
+ * 1) Create a #health_data_insert_request_h handle.<br>
+ * 2) Set the data_type for #health_data_insert_request_h handle. (refer @ref CAPI_HEALTH_DATA_MODULE for data_type).<br>
+ * 3) Construct health_data handle array i.e the values to be inserted.<br>
+ * 4) Set the health_data handle array to the #health_data_insert_request_h handle.<br>
+ * 5) Refer @ref CAPI_HEALTH_DATA_MODULE for the list of column_names (NOTE: all mandatory column values are required in the insert request, else the operation will fail).<br>
+ * 6) Perform insert operation using the health_data_resolver_insert_async() API.<br>
+ * 7) Wait for registered callback, which is executed if insertion is successful.<br>
+ * 8) Delete #health_data_insert_request_h handle.<br>
+ * @subsection CAPI_HEALTH_DATA_MODULE_READ_OPERATIONS Read Operations
+ * 1) Create a health_data_read_request_h handle.<br>
+ * 2) Set the data_type for #health_data_read_request_h handle. (refer @ref CAPI_HEALTH_DATA_MODULE for data_type).<br>
+ * 3) Create a array list of the column_names whose values are to be retrieved. (Refer @ref CAPI_HEALTH_DATA_MODULE for column_names).<br>
+ * 4) Set array list to #health_data_read_request_h handle using health_data_read_request_set_properties() API.<br>
+ * 5) Similarly the other set APIs for read (filter, limit, sort, etc) can be called.<br>
+ * 6) Perform read operation using the health_data_resolver_read_async() API.<br>
+ * 7) Wait for registered callback, which is executed if read is successful.<br>
+ * 8) Delete #health_data_read_request_h handle.<br>
+ * @subsection CAPI_HEALTH_DATA_MODULE_UPDATE_OPERATIONS Update Operations
+ * 1) Create a #health_data_update_request_h handle.<br>
+ * 2) Set the data_type for #health_data_update_request_h handle. (refer @ref CAPI_HEALTH_DATA_MODULE for data_type).<br>
+ * 3) Construct a #health_data_h handle which contains the updated values.<br>
+ * 4) Create a filter to specify the rows to be updated.<br>
+ * 5) Perform update operation using the health_data_resolver_update_async() API.<br>
+ * 6) Wait for registered callback, which is executed if update is successful.<br>
+ * 7) Delete #health_data_update_request_h handle.<br>
+ * @subsection CAPI_HEALTH_DATA_MODULE_DELETE_OPERATIONS Delete Operations
+ * 1) Create a #health_data_delete_request_h handle.<br>
+ * 2) Set the data_type for #health_data_delete_request_h handle. (refer @ref CAPI_HEALTH_DATA_MODULE for data_type).<br>
+ * 3) Create a filter to specify the rows to be deleted.<br>
+ * 4) Perform delete operation using the health_data_delete_request_h() API.<br>
+ * 5) Wait for registered callback, which is executed if deletion is successful.<br>
+ * 6) Delete #health_data_delete_request_h handle.<br>
+ * @subsection CAPI_HEALTH_DATA_MODULE_AGGREGATE_OPERATIONS Aggregate Operations
+ * 1) Create a #health_data_aggregate_request_h handle.<br>
+ * 2) Set the data_type for #health_data_aggregate_request_h handle. (refer @ref CAPI_HEALTH_DATA_MODULE for data_type).<br>
+ * 3) Set the function (avg, sum, min, max, etc) using health_data_aggregate_request_add_function() API.<br>
+ * 4) Similarly the other set APIs for aggregate (filter, sort, group_by etc) can be called .<br>
+ * 5) Perform aggregate operation using the health_data_resolver_aggregate_async() API.<br>
+ * 6) Wait for registered callback, which is executed if aggregate operation is successful.<br>
+ * 7) Delete #health_data_aggregate_request_h handle.<br>
+ *
+ */
+
+/**
+ * @internal
+ * @ingroup CAPI_HEALTH_DATA_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_MODULE_RESULT Result
+ * @brief The health result API provides the set of definitions and interfaces that enable application developers to manage health result data for insert, read, update, aggregate and delete request.
+ * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ * The health result API provides functions to manage health result data for insert, read, update, aggregate and delete request.
+ * @subsection CAPI_HEALTH_DATA_MODULE_API_USAGE API Usage
+ * 1) Perform a Read, Insert, Update, Delete or Aggregate operation. (refer @ref CAPI_HEALTH_DATA_MODULE_RESOLVER).<br>
+ * 2) If operation is successful, the registered callback is executed which contains the #health_data_result_h handle.<br>
+ * 3) Execute @ref CAPI_HEALTH_DATA_MODULE_RESULT APIs using the #health_data_result_h handle returned.<br>
+ *
+ */
+
+/**
+ * @internal
+ * @ingroup CAPI_HEALTH_DATA_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_MODULE_STORAGE Storage
+ * @brief The health storage API provides the set of definitions and interfaces that enable application developers to create/connect and disconnect from data storage.
+ * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ * The health storage API provides functions for Creating/Connecting and Disconnecting from data storage.
+ * @subsection CAPI_HEALTH_DATA_MODULE_API_USAGE API Usage
+ * 1) Create a #health_data_storage_h storage.<br>
+ * 2) Create the callback and connect using the health_data_storage_connect() API.<br>
+ * 3) The callback is executed when the connection is successful/failure.<br>
+ * 4) The callback is also executed after the health_data_storage_disconnect() API is called.<br>
+ * @section CAPI_HEALTH_DATA_MODULE_FEATURES Related Features
+ * This API is related with the following feature:
+ * - http://tizen.org/feature/datacontrol\n
+ */
+/**
+ * @internal
+ * @ingroup CAPI_HEALTH_DATA_FRAMEWORK
+ * @defgroup CAPI_HEALTH_DATA_MODULE_UTIL Util
+ * @brief The health util API provides the set of definitions and interfaces that enable application developers to use health data.
+ * @section CAPI_HEALTH_DATA_MODULE_HEADER Required Header
+ *   \#include <health.h>
+ * @section CAPI_HEALTH_DATA_FRAMEWORK_OVERVIEW Overview
+ * The health util API provides functions to use health data units and contains macros.
+ */
+ 
+
+
